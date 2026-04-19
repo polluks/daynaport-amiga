@@ -113,6 +113,7 @@ __saveds struct Device *DevInit( ASMR(d0) DEVBASEP ASMREG(d0), ASMR(a0) BPTR seg
 	db->db_scsiSettings = NULL;
 	db->db_online = 0;
 	db->db_decrementCountOnFail = 0;
+	db->db_quit = FALSE;
 	db->db_debugConsole = 0;
 	db->db_amigaNetMode = 0;
   
@@ -246,7 +247,7 @@ __saveds LONG DevOpen( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(d0) UL
 			memcpy(HW_MAC, devInfo.macAddress, 6);
 			db->db_maxPacketsSize = devInfo.maxPacketsSize;
 			db->db_maxPackets = devInfo.maxPackets;
-			D(("scsidayna: MAC Address stored, checking WIFI status\n"));
+			D(("scsidayna: MAC Address stored, checking WIFI status"));
 			logMessagef(db, "DevOpen: Max Data Transfer Size: %ld  (limited to %ld), Max Packets: %ld",db->db_maxPacketsSize, settings->maxDataSize, db->db_maxPackets);
 			if (db->db_maxPacketsSize > settings->maxDataSize) db->db_maxPacketsSize = settings->maxDataSize;
 			// Ensure db->db_maxPacketsSize is even
@@ -264,7 +265,7 @@ __saveds LONG DevOpen( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(d0) UL
 				return returnError(db, ioreq, IOERR_OPENFAIL);
 			}
 			// Take a copy of the MAC Address
-			D(("scsidayna: MAC Address stored, checking WIFI status\n"));
+			D(("scsidayna: MAC Address stored, checking WIFI status"));
 			memcpy(HW_MAC, macAddress.address, 6);
 		}				
 		logMessagef(db, "DevOpen: MAC Address %02lx:%02lx:%02lx:%02lx:%02lx:%02lx",HW_MAC[0],HW_MAC[1],HW_MAC[2],HW_MAC[3],HW_MAC[4],HW_MAC[5]); 
@@ -277,72 +278,80 @@ __saveds LONG DevOpen( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(d0) UL
 			if (!SCSIWifi_getNetwork(wifiDevice, &currentNetwork)) memset(&currentNetwork, 0, sizeof(struct SCSIWifi_NetworkEntry));
 			if (strcmp(currentNetwork.ssid, settings->ssid) == 0) {
 				logMessage(db, "DevOpen: Already Connected to Specified WIFI Network"); 
-				D(("scsidayna: Already connected to requested WIFI network\n"));
+				D(("scsidayna: Already connected to requested WIFI network"));
 			} else {
 				struct SCSIWifi_JoinRequest request;
 				strcpy(request.ssid, settings->ssid);
 				strcpy(request.key, settings->key);
 				SCSIWifi_joinNetwork(wifiDevice, &request);
 				logMessage(db, "DevOpen: Requesting to Join WIFI Network"); 
-				D(("scsidayna: Attempting to connect to WIFI network\n"));     
+				D(("scsidayna: Attempting to connect to WIFI network"));     
 			}
 		}
 		SCSIWifi_close(wifiDevice);		
-		D(("scsidayna: SCSI Device OK for %ld\n",unit));
+		D(("scsidayna: SCSI Device OK for %ld",unit));
 		
-		struct BufferManagement *bm;
-		if ((bm = (struct BufferManagement*)AllocVec(sizeof(struct BufferManagement), MEMF_CLEAR|MEMF_PUBLIC))) {
-			bm->bm_CopyToBuffer = (BMFunc)GetTagData(S2_CopyToBuff, 0, (struct TagItem *)ioreq->ios2_BufferManagement);
-			bm->bm_CopyFromBuffer = (BMFunc)GetTagData(S2_CopyFromBuff, 0, (struct TagItem *)ioreq->ios2_BufferManagement); 
-			
-			ioreq->ios2_BufferManagement = (VOID *)bm;
-			ioreq->ios2_Req.io_Error = 0;
-			ioreq->ios2_Req.io_Unit = (struct Unit *)unit; // not a real pointer, but id integer
-			ioreq->ios2_Req.io_Device = (struct Device *)db;
+		NewList(&db->db_ReadList);			InitSemaphore(&db->db_ReadListSem);
+		NewList(&db->db_WriteList);			InitSemaphore(&db->db_WriteListSem);
+		NewList(&db->db_EventList);			InitSemaphore(&db->db_EventListSem);
+		NewList(&db->db_ReadOrphanList); 	InitSemaphore(&db->db_ReadOrphanListSem);
 
-			NewList(&db->db_ReadList);			InitSemaphore(&db->db_ReadListSem);
-			NewList(&db->db_WriteList);			InitSemaphore(&db->db_WriteListSem);
-			NewList(&db->db_EventList);			InitSemaphore(&db->db_EventListSem);
-			NewList(&db->db_ReadOrphanList); 	InitSemaphore(&db->db_ReadOrphanListSem);
+		InitSemaphore(&db->db_ProcSem);
+		db->db_online = 1;
 
-			InitSemaphore(&db->db_ProcSem);
-			db->db_online = 1;
+		struct ProcInit init;
+		struct MsgPort *port;
 
-			struct ProcInit init;
-			struct MsgPort *port;
+		if (port = CreateMsgPort()) {
+			D(("scsidayna: Starting Server"));
+			db->db_quit = FALSE;
+			if (db->db_Proc = CreateNewProcTags(NP_Entry, frame_proc, NP_Name, frame_proc_name, NP_Priority, 0, TAG_DONE)) {
+				init.error = 1;
+				init.db = db;
+				init.msg.mn_Length = sizeof(init);
+				init.msg.mn_ReplyPort = port;
 
-			if (port = CreateMsgPort()) {
-				D(("scsidayna: Starting Server\n"));
-				if (db->db_Proc = CreateNewProcTags(NP_Entry, frame_proc, NP_Name, frame_proc_name, NP_Priority, 0, TAG_DONE)) {
-					init.error = 1;
-					init.db = db;
-					init.msg.mn_Length = sizeof(init);
-					init.msg.mn_ReplyPort = port;
+				D(("scsidayna: handover db: %lx",init.db));
+				PutMsg(&db->db_Proc->pr_MsgPort, (struct Message*)&init);
+				WaitPort(port);
 
-					D(("scsidayna: handover db: %lx\n",init.db));
-					PutMsg(&db->db_Proc->pr_MsgPort, (struct Message*)&init);
-					WaitPort(port);
-
-					if (init.error) {
-						logMessagef(db,"DevOpen: Process startup error"); 
-						return returnError(db, ioreq, IOERR_OPENFAIL);
-					}
-				} else {
-					logMessagef(db,"DevOpen: Couldn't create process"); 
+				if (init.error) {
+					logMessagef(db,"DevOpen: Process startup error"); 
 					return returnError(db, ioreq, IOERR_OPENFAIL);
 				}
-				DeleteMsgPort(port);
 			} else {
-				logMessagef(db,"DevOpen: Failed to create message port"); 
+				logMessagef(db,"DevOpen: Couldn't create process"); 
 				return returnError(db, ioreq, IOERR_OPENFAIL);
 			}
+			DeleteMsgPort(port);
+		} else {
+			logMessagef(db,"DevOpen: Failed to create message port"); 
+			return returnError(db, ioreq, IOERR_OPENFAIL);
 		}
+	}
+	
+	struct BufferManagement *bm;
+	if ((bm = (struct BufferManagement*)AllocVec(sizeof(struct BufferManagement), MEMF_CLEAR|MEMF_PUBLIC))) {
+		if (!(bm->bm_CopyToBuffer = (BMFunc)GetTagData(S2_CopyToBuff16, 0, (struct TagItem *)ioreq->ios2_BufferManagement))){
+			bm->bm_CopyToBuffer = (BMFunc)GetTagData(S2_CopyToBuff, 0, (struct TagItem *)ioreq->ios2_BufferManagement);
+		}
+
+		if (!(bm->bm_CopyFromBuffer = (BMFunc)GetTagData(S2_CopyFromBuff16, 0, (struct TagItem *)ioreq->ios2_BufferManagement))){
+			bm->bm_CopyFromBuffer = (BMFunc)GetTagData(S2_CopyFromBuff, 0, (struct TagItem *)ioreq->ios2_BufferManagement);
+		}
+		
+		ioreq->ios2_BufferManagement = (VOID *)bm;
+		ioreq->ios2_Req.io_Error = 0;
+		ioreq->ios2_Req.io_Unit = (struct Unit *)unit; // not a real pointer, but id integer
+		ioreq->ios2_Req.io_Device = (struct Device *)db;
+	}else{
+		return returnError(db, ioreq, IOERR_OPENFAIL);
 	}
 		
 	ioreq->ios2_Req.io_Message.mn_Node.ln_Type = NT_REPLYMSG;
 	db->db_Lib.lib_Flags &= ~LIBF_DELEXP;
 	
-	D(("scsidayna: DevOpen\n"));
+	D(("scsidayna: DevOpen"));
 	logMessage(db, "DevOpen: Ready"); 
 	return 0;
 }
@@ -358,6 +367,7 @@ __saveds BPTR DevClose( ASMR(a1) struct IORequest *ioreq ASMREG(a1), ASMR(a6) DE
 		if (db->db_Proc) {
 			D(("scsidayna: End Proc...\n"));
 			Signal((struct Task*)db->db_Proc, SIGBREAKF_CTRL_C);
+			db->db_quit = TRUE ; // Alternative closure control if signals are not processing 
 
 			// Wait for shutdown
 			ObtainSemaphore(&db->db_ProcSem);
@@ -393,7 +403,10 @@ __saveds BPTR DevExpunge( ASMR(a6) DEVBASEP ASMREG(a6) ) {
 __saveds VOID DevBeginIO( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(a6) DEVBASEP ASMREG(a6) ) {    
 	ioreq->ios2_Req.io_Message.mn_Node.ln_Type = NT_MESSAGE;
 	ioreq->ios2_Req.io_Error = S2ERR_NO_ERROR;
-	ioreq->ios2_WireError = S2WERR_GENERIC_ERROR;
+	if (ioreq->ios2_Req.io_Command != S2_ONEVENT){
+		// Wire error used by onevent but otherwise can be set to generic error
+		ioreq->ios2_WireError = S2WERR_GENERIC_ERROR;
+	}
 
 	switch( ioreq->ios2_Req.io_Command ) {
 	case NSCMD_DEVICEQUERY: 
@@ -428,6 +441,7 @@ __saveds VOID DevBeginIO( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(a6)
 		break;
 		
 	case CMD_READ:
+		D(("R"));
 		if (ioreq->ios2_BufferManagement == NULL) {
 			ioreq->ios2_Req.io_Error = S2ERR_BAD_ARGUMENT;
 			ioreq->ios2_WireError = S2WERR_BUFF_ERROR;
@@ -444,6 +458,7 @@ __saveds VOID DevBeginIO( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(a6)
 		break;
 
 	case S2_GETGLOBALSTATS:
+		D(("GETGLOBALSTATS"));
 		memcpy(ioreq->ios2_StatData, &db->db_DevStats, sizeof(struct Sana2DeviceStats));
 		break;
 
@@ -457,6 +472,7 @@ __saveds VOID DevBeginIO( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(a6)
 		}
 		// fall through!	
 	case CMD_WRITE: 
+		D(("W"));
 		if (ioreq->ios2_BufferManagement == NULL) {
 			ioreq->ios2_Req.io_Error = S2ERR_BAD_ARGUMENT;
 			ioreq->ios2_WireError = S2WERR_BUFF_ERROR;
@@ -477,26 +493,32 @@ __saveds VOID DevBeginIO( ASMR(a1) struct IOSana2Req *ioreq ASMREG(a1), ASMR(a6)
 		break;
   
     case S2_ONEVENT:
+		D(("S2_ONEVENT"));
       if (((ioreq->ios2_WireError & S2EVENT_ONLINE) && (db->db_currentWifiState)) ||
          ((ioreq->ios2_WireError & S2EVENT_OFFLINE) && (!db->db_currentWifiState))) {
            ioreq->ios2_Req.io_Error = 0;
            ioreq->ios2_WireError &= (S2EVENT_ONLINE|S2EVENT_OFFLINE);
+		   ioreq->ios2_Req.io_Flags |= SANA2IOF_QUICK;
+		   D(("S2_ONEVENT: reply quick, wireerror 0x%04X", ioreq->ios2_WireError));
            DevTermIO(db, (struct IORequest*)ioreq);
            ioreq = NULL;
-      } else
-      if ((ioreq->ios2_WireError & (S2EVENT_ONLINE|S2EVENT_OFFLINE|S2EVENT_ERROR|S2EVENT_TX|S2EVENT_RX|S2EVENT_BUFF|S2EVENT_HARDWARE|S2EVENT_SOFTWARE)) != ioreq->ios2_WireError) {
-        // we cannot handle such events 
-        ioreq->ios2_Req.io_Error = S2ERR_NOT_SUPPORTED;
-        ioreq->ios2_WireError = S2WERR_BAD_EVENT;
-      }
-      else {
-        // Queue anything else 
-        ioreq->ios2_Req.io_Flags &= ~SANA2IOF_QUICK;
-        ObtainSemaphore(&db->db_EventListSem);
-        AddTail((struct List*)&db->db_EventList, (struct Node*)ioreq);
-        ReleaseSemaphore(&db->db_EventListSem);
-        ioreq = NULL;
-      }
+      } else{
+		  if ((ioreq->ios2_WireError & (S2EVENT_ONLINE|S2EVENT_OFFLINE|S2EVENT_ERROR|S2EVENT_TX|S2EVENT_RX|S2EVENT_BUFF|S2EVENT_HARDWARE|S2EVENT_SOFTWARE)) != ioreq->ios2_WireError) {
+			// we cannot handle such events 
+			ioreq->ios2_Req.io_Error = S2ERR_NOT_SUPPORTED;
+			ioreq->ios2_WireError = S2WERR_BAD_EVENT;
+			D(("S2_ONEVENT: error, not supported event"));
+		  }
+		  else {
+			  D(("S2_ONEVENT: queued"));
+			// Queue anything else 
+			ioreq->ios2_Req.io_Flags &= ~SANA2IOF_QUICK;
+			ObtainSemaphore(&db->db_EventListSem);
+			AddTail((struct List*)&db->db_EventList, (struct Node*)ioreq);
+			ReleaseSemaphore(&db->db_EventListSem);
+			ioreq = NULL;
+		  }
+	  }
       break;  
 
 	case S2_READORPHAN:
@@ -834,13 +856,15 @@ __saveds void frame_proc() {
 	ObtainSemaphore(&db->db_ProcSem);
   
 	// Temporary packet store
-	UBYTE* packetData;
+	UBYTE *packetData;
 	struct IOSana2Req** pendingSends = NULL;
 	if (db->db_amigaNetMode) {	
 		 packetData = AllocVec(db->db_maxPacketsSize + 2, MEMF_PUBLIC);	
 		 pendingSends = (struct IOSana2Req**)AllocVec(db->db_maxPackets * sizeof(struct IOSana2Req*), MEMF_PUBLIC);	
-	} else packetData = AllocVec(SCSIWIFI_PACKET_MAX_SIZE + 6, MEMF_PUBLIC);	
-	
+	} else{ 
+		packetData = AllocVec(SCSIWIFI_PACKET_MAX_SIZE + 6, MEMF_PUBLIC);	
+	}
+
 	struct MsgPort timerPort;
 	timerPort.mp_Node.ln_Pri = 0;                       
 	timerPort.mp_SigBit      = AllocSignal(-1);
@@ -927,6 +951,10 @@ __saveds void frame_proc() {
 	ULONG recv = 0;
 	USHORT currentWifiState = 0;	
 	
+	D(("Timer mask %04lx",timerSignalMask));
+	D(("SIGBREAKF_CTRL_F mask %04lx",SIGBREAKF_CTRL_F));
+	D(("SIGBREAKF_CTRL_C mask %04lx",SIGBREAKF_CTRL_C));
+	
 	// Change task priority
 	if (settings->taskPriority != 0) SetTaskPri((struct Task*)db->db_Proc,settings->taskPriority);      
 
@@ -935,7 +963,7 @@ __saveds void frame_proc() {
 	USHORT lastWifiStatus = 1;    // assume OK, although this should get overwritten straight away
 
 	D(("scsidayna_task: starting loop\n"));
-	while (!(recv & SIGBREAKF_CTRL_C)) {
+	while (!(recv & SIGBREAKF_CTRL_C) && !db->db_quit) {
 		struct IOSana2Req *nextwrite;
 		USHORT shouldBeEnabled = db->db_online;
 
@@ -1228,6 +1256,7 @@ __saveds void frame_proc() {
 				ReleaseSemaphore(&db->db_WriteListSem);
 			}
 			
+			recv = SetSignal(0L, 0L);
 			if (recv & SIGBREAKF_CTRL_C) {
 				D(("Terminate Requested"));
 			} else {
@@ -1235,9 +1264,18 @@ __saveds void frame_proc() {
 					// we use unit VBLANK therefore the granularity of our wait will be 1/50th (1/60th)
 					// of a second. So essentially this will wait until the next vblank, unless
 					// signaled, which is good enough to yield.
-					time_req->tr_time.tv_micro = 1L;
-					SendIO((struct IORequest *)time_req);
-					recv = Wait(SIGBREAKF_CTRL_C | timerSignalMask | SIGBREAKF_CTRL_F);
+					if (!settings->aggressive){
+						time_req->tr_time.tv_micro = 1L;
+						SendIO((struct IORequest *)time_req);
+						db->db_timerUsed = TRUE ;
+						recv = Wait(SIGBREAKF_CTRL_C | timerSignalMask | SIGBREAKF_CTRL_F);
+						if (!CheckIO((struct IORequest *)time_req)) { // IO is pending
+							AbortIO((struct IORequest *)time_req);
+						}
+						WaitIO((struct IORequest *)time_req);  // wait until IO fully done
+						SetSignal(0, timerSignalMask); // Very important reset of timer!
+					}
+
 				}
 			}
 			
@@ -1245,20 +1283,28 @@ __saveds void frame_proc() {
 			// Not enabled? Pause for a decent amount of time
 			time_req->tr_time.tv_micro = 250 * 1000L;
 			SendIO((struct IORequest *)time_req);
+			db->db_timerUsed = TRUE ;
 			recv = Wait(SIGBREAKF_CTRL_C | timerSignalMask | SIGBREAKF_CTRL_F);
-			AbortIO((struct IORequest *)time_req);
+			if (!CheckIO((struct IORequest *)time_req)) { // IO is pending
+				AbortIO((struct IORequest *)time_req);
+			}
+			WaitIO((struct IORequest *)time_req);  // wait until IO fully done
+			SetSignal(0, timerSignalMask); // Very important reset of timer!
 		}
+
 	}
 	
 	D(("scsidayna_task: exiting loop\n"));
 	logMessage(db,"PacketServer: Shutting down [1]");
 	
 	// Make sure it's finished - this prevents an intermittent crash at shutdown!
-	if (CheckIO((struct IORequest *)time_req)) { // IO is pending
-        AbortIO((struct IORequest *)time_req);
-        WaitIO((struct IORequest *)time_req);  // wait until IO fully done
-    }
-	
+	if (db->db_timerUsed){
+		if (!CheckIO((struct IORequest *)time_req)) { // IO is pending
+			AbortIO((struct IORequest *)time_req);
+		}
+		WaitIO((struct IORequest *)time_req);  // wait until IO fully done
+		SetSignal(0, timerSignalMask); // Very important reset of timer!
+	}	
 	D(("scsidayna_task: i/o shutdown\n"));
 	logMessage(db,"PacketServer: Shutting down [2]");
 

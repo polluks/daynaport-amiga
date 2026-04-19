@@ -41,6 +41,8 @@ struct devbase {
 	
 	BPTR db_debugConsole;  // I couldnt get any form of S2_SANA2HOOK working	
 	BOOL db_decrementCountOnFail;
+	BOOL db_quit;
+	BOOL db_timerUsed ;
 		
 	volatile USHORT db_online;
 	volatile USHORT db_currentWifiState;   // the *actual* online state

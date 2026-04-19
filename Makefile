@@ -22,8 +22,8 @@
 # 
 ###############################################################################
 DEVICEVERSION=1
-DEVICEREVISION=3
-DEVICEDATE=2025-09-25
+DEVICEREVISION=5
+DEVICEDATE=2026-03-09
 
 ###############################################################################
 # Devices to build (1 or 2, keep DEVICEID2 empty if only one build is desired)

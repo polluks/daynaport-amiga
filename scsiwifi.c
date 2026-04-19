@@ -52,8 +52,8 @@
 
 #define INQUIRE_BUFFER_SIZE                 64
 
-#define NUM_TOKENS 9
-static char* CONFIG_TOKENS[NUM_TOKENS] = {"DEVICE","DEVICEID","PRIORITY","MODE","AUTOCONNECT","SSID","KEY","DATASIZE","DEBUG"};
+#define NUM_TOKENS 10
+static char* CONFIG_TOKENS[NUM_TOKENS] = {"DEVICE","DEVICEID","PRIORITY","MODE","AUTOCONNECT","SSID","KEY","DATASIZE","DEBUG","AGGRESSIVE"};
 
 // Prepares the SCSI command and resets some of the result values
 #define SCSI_PREPCMD(device, cmd, sub, a, b, c, d) \
@@ -206,6 +206,7 @@ void SCSIWifi_defaultSettings(struct ScsiDaynaSettings* settings) {
     strcpy(settings->key, "");
 	settings->debug = 1;       // Logging by default
 	settings->maxDataSize = 8192;
+	settings->aggressive = 0;
 }
 
 // Loads settings from the ENV, returns 0 if the settings were bad and defaults were setup
@@ -244,7 +245,8 @@ LONG SCSIWifi_loadSettings(void *utilityBase, void* dosBase, struct ScsiDaynaSet
                             case 5: strcpy_s(settings->ssid, value, 64); break;
                             case 6: strcpy_s(settings->key, value, 64); break;
 							case 7: settings->maxDataSize = _atous(value); break;
-							case 8: settings->debug = _atos(value) != 0; break;							
+							case 8: settings->debug = _atos(value) != 0; break;
+							case 9: settings->aggressive = _atos(value) != 0; break;
                             default: matches--; break;
                         }
                         break;
@@ -288,6 +290,7 @@ LONG SCSIWifi_saveSettings(struct DosBase *dosBase, struct ScsiDaynaSettings* se
                 case 6:  if (!FPuts(fh, settings->key)) good = 0; break;
 				case 7:  _ustoa(settings->maxDataSize, tmp);  if (!FPuts(fh, tmp)) good = 0; break;
 				case 8:  _ustoa(settings->debug, tmp);  if (!FPuts(fh, tmp)) good = 0; break;
+				case 9:  _ustoa(settings->aggressive, tmp);  if (!FPuts(fh, tmp)) good = 0; break;
             }
             if (!FPuts(fh, "\n")) good = 0;
         }

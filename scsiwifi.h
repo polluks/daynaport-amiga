@@ -90,6 +90,7 @@ struct ScsiDaynaSettings {
   ULONG maxDataSize;
   // If debug is enabled - creates a console window and shows the output
   UBYTE debug;
+  UBYTE aggressive;
 };
 
 #ifdef __VBCC__

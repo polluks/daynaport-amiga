@@ -47,6 +47,11 @@ LINKEXE = vc +aos68k
 #LINK = $(CCX) -nostdlib
 CFLAGS  = -O2 -+ -sc -cpu=$(CPU)
 CFLAGS2 = -Os -+ -sc -c99 -cpu=$(CPU2)
+ifeq ($(debug),1)
+CFLAGS  = 
+CFLAGS2 = 
+endif
+
 
 else
 
@@ -72,7 +77,7 @@ VASMFORMAT2 = -m$(CPU2) -Fhunk -nowarn=2064 -quiet $(SYSINC)
 #
 ###############################################################################
 
-IPATH =
+IPATH = -I/opt/amiga/NDK3.2/Include_H
 
 ###############################################################################
 #
@@ -106,6 +111,7 @@ endif
 # debug
 #
 ###############################################################################
+
 ifeq ($(debug),1)
 CFLAGS  += -DDEBUG -g
 CFLAGS2 += -DDEBUG -g
