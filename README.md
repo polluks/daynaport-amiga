@@ -24,7 +24,7 @@ This will work with the older firmware, (BlueSCSI v2024.10.26, ZuluSCSI v2024.03
 - [ZuluSCSI Pico Slim (DB25)](https://shop.rabbitholecomputing.com/products/zuluscsi-rp2040-pico-slim)
 - [ZuluSCSI Blaster (RP2350B)](https://zuluscsi.com) with RM2 WiFi module
 
-Tested configurations:
+Some Tested Configurations:
 
 ### Amiga 500/+ (2M Chip)
 - A590 HDD (2M Fast RAM, 7.0 ROM) with Kickstart 3.2 (scsi.device)
@@ -34,8 +34,9 @@ Tested configurations:
 - Blizzard 1230IV / SCSI Kit (1230scsi.device)
 
 ### Amiga 2000 (2M Chip)
-- GVP Impact A2000-HC+8 Series II (8M Fast RAM), Kickstart 3.1 (gvpscsi.device)
-- A2091, Kickstart 3.1 (scsi.device)
+- GVP Impact A2000-HC+8 Series II (8M Fast RAM), Kickstart 3.1 (gvpscsi.device) - MODE=2
+- GVP Impact A2000-HC+8 Series II + Guru ROM 6.14 - MODE=0 
+- A2091, Kickstart 3.1 (scsi.device) - MODE=1
 - phase5 Blizzard 2060 SCSI, Kickstart 3.1 (2060scsi.device)
 	
 #### Side effects
