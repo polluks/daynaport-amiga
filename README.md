@@ -62,6 +62,7 @@ SSID=
 KEY=
 DATASIZE=
 DEBUG=
+AGGRESSIVE=
 ```
 
 where:
@@ -74,6 +75,7 @@ where:
 - KEY the wifi key/password
 - DATASIZE With the new Scsi firmware, you can bulk-transfer packet data upto this amount for increased speed (defaults to 8192, some devices might not support different sizes)
 - DEBUG 0/1 Causes a console window to appear to help debug issues with the driver, disable when sorted or it slows things down
+- AGGRESSIVE 0/1 Enables agressive mode, driver run without 1ms wait - experimental - may scale with processor/priority
 
 ## Mode
 This patches around weirdness in the various SCSI drivers. Mode should be:
